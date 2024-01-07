@@ -1,3 +1,5 @@
+use serde_json::json;
+use std::env;
 use serenity::{
     async_trait,
     model::{channel::Message, gateway::Ready},
@@ -9,10 +11,6 @@ use serenity::{
     },
 };
 use reqwest;
-use serde_json;
-use tokio;
-use dotenv::dotenv;
-use std::env;
 
 struct Handler;
 
@@ -35,7 +33,6 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 async fn search(ctx: &Context, msg: &Message) -> CommandResult {
-    // Ensure there is a query to search for
     if msg.content.len() > "!search ".len() {
         let search_query = &msg.content["!search ".len()..].trim();
         let response = search_ai_api(search_query).await;
@@ -47,36 +44,42 @@ async fn search(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 async fn search_ai_api(query: &str) -> String {
-    let api_endpoint = "https://api.openai.com/v1/engines/davinci/completions"; // OpenAI's endpoint
+    let api_endpoint = "https://api.openai.com/v1/chat/completions"; // Updated endpoint for chat completions
     let api_key = env::var("OPENAI_API_KEY").expect("Expected OPENAI_API_KEY in the environment");
 
-    let client = reqwest::Client::new();
-    let params = serde_json::json!({
-        "prompt": query,
-        "max_tokens": 150
+    let conversation = json!([{
+        "role": "user",
+        "content": query
+    }]);
+    let params = json!({
+        "model": "gpt-4",  // Specify the GPT-4 model or any other compatible version
+        "messages": conversation,
+        // Include other optional parameters as needed
     });
 
-    if let Ok(response) = client
+    let client = reqwest::Client::new();
+    let response = client
         .post(api_endpoint)
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&params)
         .send()
-        .await {
-            if let Ok(response_text) = response.text().await {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                    if let Some(answer) = parsed["choices"][0]["text"].as_str() {
-                        return answer.to_string();
-                    }
+        .await;
+
+    if let Ok(response) = response {
+        if let Ok(response_text) = response.text().await {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                if let Some(answer) = parsed["choices"][0]["message"]["content"].as_str() {
+                    return answer.to_string();
                 }
             }
         }
-
+    }
     "Failed to fetch or parse response from AI".to_string()
 }
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    dotenv::dotenv().ok(); // Load .env file if it exists
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
     let framework = StandardFramework::new()
